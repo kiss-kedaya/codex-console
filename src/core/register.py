@@ -19,6 +19,7 @@ from curl_cffi import requests as cffi_requests
 
 from .openai.oauth import OAuthManager, OAuthStart
 from .http_client import OpenAIHTTPClient, HTTPClientError
+from .anyauto.register_flow import AnyAutoRegistrationEngine
 from ..services import EmailServiceFactory, BaseEmailService, EmailServiceType
 from ..database import crud
 from ..database.session import get_db
@@ -2901,176 +2902,59 @@ class RegistrationEngine:
 
     def run(self) -> RegistrationResult:
         """
-        执行完整的注册流程
-
-        支持已注册账号自动登录：
-        - 如果检测到邮箱已注册，自动切换到登录流程
-        - 已注册账号跳过：设置密码、发送验证码、创建用户账户
-        - 共用步骤：获取验证码、验证验证码、Workspace 和 OAuth 回调
-
-        Returns:
-            RegistrationResult: 注册结果
+        执行 any-auto-register 风格的注册流程
         """
         result = RegistrationResult(success=False, logs=self.logs)
-
         try:
-            token_ready = False
-            self._is_existing_account = False
-            self._token_acquisition_requires_login = False
-            self._otp_sent_at = None
-            self._create_account_continue_url = None
-            self._create_account_workspace_id = None
-            self._create_account_account_id = None
-            self._create_account_refresh_token = None
-            self._create_account_callback_url = None
-            self._create_account_page_type = None
-            self._last_validate_otp_continue_url = None
-            self._last_validate_otp_workspace_id = None
+            settings = get_settings()
+            max_retries = int(getattr(settings, "registration_max_retries", 3) or 3)
 
-            self._log("=" * 60)
-            self._log("注册流程启动，开始替你敲门")
-            self._log("=" * 60)
-            self._log(f"注册入口链路配置: {self.registration_entry_flow}")
-            configured_entry_flow = self.registration_entry_flow
-            service_type_raw = getattr(self.email_service, "service_type", "")
-            service_type_value = str(getattr(service_type_raw, "value", service_type_raw) or "").strip().lower()
-            effective_entry_flow = configured_entry_flow
-            if service_type_value == "outlook":
-                self._log("检测到 Outlook 邮箱，自动使用 Outlook 入口链路（无需在设置中选择）")
-                effective_entry_flow = "outlook"
+            flow_engine = AnyAutoRegistrationEngine(
+                email_service=self.email_service,
+                proxy_url=self.proxy_url,
+                callback_logger=self._log,
+                max_retries=max_retries,
+                browser_mode="protocol",
+                extra_config=None,
+            )
 
-            # 1. 检查 IP 地理位置
-            self._log("1. 先看看这条网络从哪儿来，别一开局就站错片场...")
-            ip_ok, location = self._check_ip_location()
-            if not ip_ok:
-                result.error_message = f"IP 地理位置不支持: {location}"
-                self._log(f"IP 检查失败: {location}", "error")
+            flow_result = flow_engine.run()
+
+            # 同步关键状态供后续存库/导出
+            self.email_info = flow_engine.email_info
+            self.email = flow_engine.email
+            self.inbox_email = flow_engine.inbox_email
+            self.password = flow_engine.password
+            self.session = flow_engine.session
+            self.device_id = flow_engine.device_id
+
+            result.email = self.email or ""
+            result.password = self.password or ""
+            result.device_id = self.device_id or ""
+
+            if not flow_result or not flow_result.get("success"):
+                result.error_message = (flow_result or {}).get("error_message", "注册失败")
                 return result
-
-            self._log(f"IP 位置: {location}")
-
-            # 2. 创建邮箱
-            self._log("2. 开个新邮箱，准备收信...")
-            if not self._create_email():
-                result.error_message = "创建邮箱失败"
-                return result
-
-            result.email = self.email
-
-            # 3. 准备首轮授权流程
-            did, sen_token = self._prepare_authorize_flow("首次授权")
-            if not did:
-                result.error_message = "获取 Device ID 失败"
-                return result
-            result.device_id = did
-            if not sen_token:
-                result.error_message = "Sentinel POW 验证失败"
-                return result
-
-            # 4. 提交注册入口邮箱
-            self._log("4. 递上邮箱，看看 OpenAI 这球怎么接...")
-            signup_result = self._submit_signup_form(did, sen_token)
-            if not signup_result.success:
-                result.error_message = f"提交注册表单失败: {signup_result.error_message}"
-                return result
-
-            if self._is_existing_account:
-                self._log("检测到这是老朋友账号，直接切去登录拿 token，不走弯路")
-            else:
-                self._log("5. 设置密码，别让小偷偷笑...")
-                password_ok, _ = self._register_password(did, sen_token)
-                if not password_ok:
-                    result.error_message = self._last_register_password_error or "注册密码失败"
-                    return result
-
-                self._log("6. 催一下注册验证码出门，邮差该冲刺了...")
-                if not self._send_verification_code():
-                    result.error_message = "发送验证码失败"
-                    return result
-
-                self._log("7. 等验证码飞来，邮箱请注意查收...")
-                self._log("8. 对一下验证码，看看是不是本人...")
-                if not self._verify_email_otp_with_retry(stage_label="注册验证码", max_attempts=3):
-                    result.error_message = "验证验证码失败"
-                    return result
-
-                self._log("9. 给账号办个正式户口，名字写档案里...")
-                if not self._create_user_account():
-                    result.error_message = "创建用户账户失败"
-                    return result
-
-                if self._create_account_callback_url:
-                    self._log("create_account 已返回 OAuth callback，尝试跳过二次登录...")
-                    token_ready = self._consume_create_account_callback(result)
-                    if token_ready:
-                        self._log("create_account callback 已完成会话交换，跳过重登流程")
-                    else:
-                        result.error_message = "create_account callback 获取 access_token 失败"
-                        self._log("create_account callback 未能完成会话，终止本轮注册", "error")
-                        return result
-                if (not token_ready) and effective_entry_flow in {"native", "outlook"}:
-                    login_ready, login_error = self._restart_login_flow()
-                    if not login_ready:
-                        result.error_message = login_error
-                        return result
-                    if effective_entry_flow == "outlook":
-                        self._log("注册入口链路: Outlook（迁移版，按朋友版 Outlook 主流程收尾）")
-                else:
-                    self._log("注册入口链路: ABCard（新账号不重登，直接抓取会话）")
-
-            if not token_ready:
-                if effective_entry_flow == "native":
-                    if not self._complete_token_exchange_native_backup(result):
-                        return result
-                elif effective_entry_flow == "outlook":
-                    if not self._complete_token_exchange_outlook(result):
-                        return result
-                else:
-                    use_abcard_entry = (effective_entry_flow == "abcard") and (not self._is_existing_account)
-                    if not self._complete_token_exchange(result, require_login_otp=not use_abcard_entry):
-                        return result
-            else:
-                # 已通过 create_account callback 拿到 token，补齐必要字段
-                if not result.account_id and self._create_account_account_id:
-                    result.account_id = str(self._create_account_account_id or "").strip()
-                if not result.workspace_id and self._create_account_workspace_id:
-                    result.workspace_id = str(self._create_account_workspace_id or "").strip()
-                if not result.refresh_token and self._create_account_refresh_token:
-                    result.refresh_token = str(self._create_account_refresh_token or "").strip()
-                if not result.device_id:
-                    result.device_id = str(self.device_id or "")
-
-            # 10. 完成
-            self._log("=" * 60)
-            if self._is_existing_account:
-                self._log("登录成功，老朋友顺利回家")
-            else:
-                self._log("注册成功，账号已经稳稳落地，可以开香槟了")
-            self._log(f"邮箱: {result.email}")
-            self._log(f"Device ID: {result.device_id or '-'}")
-            self._log(f"Account ID: {result.account_id}")
-            self._log(f"Workspace ID: {result.workspace_id}")
-            self._log("=" * 60)
 
             result.success = True
-            settings = get_settings()
-            client_id = str(getattr(settings, "openai_client_id", "") or getattr(self.oauth_manager, "client_id", "") or "").strip()
-            result.metadata = {
+            result.access_token = flow_result.get("access_token", "")
+            result.refresh_token = flow_result.get("refresh_token", "")
+            result.id_token = flow_result.get("id_token", "")
+            result.session_token = flow_result.get("session_token", "")
+            result.account_id = flow_result.get("account_id", "") or ""
+            result.workspace_id = flow_result.get("workspace_id", "") or ""
+            result.source = "register"
+
+            metadata = flow_result.get("metadata") or {}
+            metadata.update({
                 "email_service": self.email_service.service_type.value,
                 "proxy_used": self.proxy_url,
                 "registered_at": datetime.now().isoformat(),
-                "is_existing_account": self._is_existing_account,
-                "token_acquired_via_relogin": self._token_acquisition_requires_login,
-                "client_id": client_id,
-                "device_id": result.device_id,
+                "registration_flow": "any-auto-register",
                 "has_session_token": bool(result.session_token),
                 "has_access_token": bool(result.access_token),
-                "has_refresh_token": bool(result.refresh_token),
-                "registration_entry_flow": configured_entry_flow,
-                "registration_entry_flow_effective": effective_entry_flow,
-                # 对齐 K:\1\2：原生入口允许无 session_token 成功，但会标记待补。
-                "session_token_pending": (effective_entry_flow == "native") and (not bool(result.session_token)),
-            }
+            })
+            result.metadata = metadata
 
             return result
 
@@ -3078,7 +2962,6 @@ class RegistrationEngine:
             self._log(f"注册过程中发生未预期错误: {e}", "error")
             result.error_message = str(e)
             return result
-
     def save_to_database(self, result: RegistrationResult) -> bool:
         """
         保存注册结果到数据库
