@@ -5,6 +5,7 @@ from src.config.constants import EmailServiceType, OPENAI_API_ENDPOINTS, OPENAI_
 from src.core.http_client import OpenAIHTTPClient
 from src.core.openai.oauth import OAuthStart
 from src.core.register import RegistrationEngine
+from src.core.anyauto.register_flow import AnyAutoRegistrationEngine
 from src.services.base import BaseEmailService
 
 
@@ -187,110 +188,82 @@ def test_check_sentinel_sends_non_empty_pow(monkeypatch):
     assert body["p"] == "gAAAAACpow-token"
 
 
-def test_run_registers_then_relogs_to_fetch_token():
-    session_one = QueueSession([
-        ("GET", "https://auth.example.test/flow/1", _response_with_did("did-1")),
-        (
-            "POST",
-            OPENAI_API_ENDPOINTS["signup"],
-            DummyResponse(payload={"page": {"type": OPENAI_PAGE_TYPES["PASSWORD_REGISTRATION"]}}),
-        ),
-        ("POST", OPENAI_API_ENDPOINTS["register"], DummyResponse(payload={})),
-        ("GET", OPENAI_API_ENDPOINTS["send_otp"], DummyResponse(payload={})),
-        ("POST", OPENAI_API_ENDPOINTS["validate_otp"], DummyResponse(payload={})),
-        ("POST", OPENAI_API_ENDPOINTS["create_account"], DummyResponse(payload={})),
-    ])
-    session_two = QueueSession([
-        ("GET", "https://auth.example.test/flow/2", _response_with_did("did-2")),
-        (
-            "POST",
-            OPENAI_API_ENDPOINTS["signup"],
-            DummyResponse(payload={"page": {"type": OPENAI_PAGE_TYPES["LOGIN_PASSWORD"]}}),
-        ),
-        (
-            "POST",
-            OPENAI_API_ENDPOINTS["password_verify"],
-            DummyResponse(payload={"page": {"type": OPENAI_PAGE_TYPES["EMAIL_OTP_VERIFICATION"]}}),
-        ),
-        ("POST", OPENAI_API_ENDPOINTS["validate_otp"], _response_with_login_cookies()),
-        (
-            "POST",
-            OPENAI_API_ENDPOINTS["select_workspace"],
-            DummyResponse(payload={"continue_url": "https://auth.example.test/continue"}),
-        ),
-        (
-            "GET",
-            "https://auth.example.test/continue",
-            DummyResponse(
-                status_code=302,
-                headers={"Location": "http://localhost:1455/auth/callback?code=code-2&state=state-2"},
-            ),
-        ),
-    ])
-
-    email_service = FakeEmailService(["123456", "654321"])
+def test_run_maps_anyauto_success_result(monkeypatch):
+    email_service = FakeEmailService([])
     engine = RegistrationEngine(email_service)
-    fake_oauth = FakeOAuthManager()
-    engine.http_client = FakeOpenAIClient([session_one, session_two], ["sentinel-1", "sentinel-2"])
-    engine.oauth_manager = fake_oauth
+
+    def fake_run(self):
+        self.email_info = {"email": "tester@example.com", "service_id": "mailbox-1"}
+        self.email = "tester@example.com"
+        self.inbox_email = "tester@example.com"
+        self.password = "Passw0rd!"
+        self.session = object()
+        self.device_id = "did-v2"
+        return {
+            "success": True,
+            "access_token": "access-v2",
+            "refresh_token": "refresh-v2",
+            "id_token": "id-v2",
+            "session_token": "session-v2",
+            "account_id": "acct-v2",
+            "workspace_id": "ws-v2",
+            "metadata": {"auth_provider": "next-auth"},
+        }
+
+    monkeypatch.setattr(AnyAutoRegistrationEngine, "run", fake_run)
 
     result = engine.run()
 
     assert result.success is True
     assert result.source == "register"
-    assert result.workspace_id == "ws-1"
-    assert result.session_token == "session-1"
-    assert fake_oauth.start_calls == 2
-    assert len(email_service.otp_requests) == 2
-    assert all(item["otp_sent_at"] is not None for item in email_service.otp_requests)
-    assert sum(1 for call in session_one.calls if call["url"] == OPENAI_API_ENDPOINTS["send_otp"]) == 1
-    assert sum(1 for call in session_two.calls if call["url"] == OPENAI_API_ENDPOINTS["send_otp"]) == 0
-    assert sum(1 for call in session_one.calls if call["url"] == OPENAI_API_ENDPOINTS["select_workspace"]) == 0
-    assert sum(1 for call in session_two.calls if call["url"] == OPENAI_API_ENDPOINTS["select_workspace"]) == 1
-    relogin_start_body = json.loads(session_two.calls[1]["kwargs"]["data"])
-    assert relogin_start_body["screen_hint"] == "login"
-    assert relogin_start_body["username"]["value"] == "tester@example.com"
-    password_verify_body = json.loads(session_two.calls[2]["kwargs"]["data"])
-    assert password_verify_body == {"password": result.password}
-    assert result.metadata["token_acquired_via_relogin"] is True
+    assert result.email == "tester@example.com"
+    assert result.password == "Passw0rd!"
+    assert result.device_id == "did-v2"
+    assert result.account_id == "acct-v2"
+    assert result.workspace_id == "ws-v2"
+    assert result.session_token == "session-v2"
+    assert result.access_token == "access-v2"
+    assert result.refresh_token == "refresh-v2"
+    assert result.id_token == "id-v2"
+    assert result.metadata["auth_provider"] == "next-auth"
+    assert result.metadata["registration_flow"] == "any-auto-register"
+    assert result.metadata["has_session_token"] is True
+    assert result.metadata["has_access_token"] is True
 
 
-def test_existing_account_login_uses_auto_sent_otp_without_manual_send():
-    session = QueueSession([
-        ("GET", "https://auth.example.test/flow/1", _response_with_did("did-1")),
-        (
-            "POST",
-            OPENAI_API_ENDPOINTS["signup"],
-            DummyResponse(payload={"page": {"type": OPENAI_PAGE_TYPES["EMAIL_OTP_VERIFICATION"]}}),
-        ),
-        ("POST", OPENAI_API_ENDPOINTS["validate_otp"], _response_with_login_cookies("ws-existing", "session-existing")),
-        (
-            "POST",
-            OPENAI_API_ENDPOINTS["select_workspace"],
-            DummyResponse(payload={"continue_url": "https://auth.example.test/continue-existing"}),
-        ),
-        (
-            "GET",
-            "https://auth.example.test/continue-existing",
-            DummyResponse(
-                status_code=302,
-                headers={"Location": "http://localhost:1455/auth/callback?code=code-1&state=state-1"},
-            ),
-        ),
-    ])
-
-    email_service = FakeEmailService(["246810"])
+def test_run_maps_anyauto_phone_required_result(monkeypatch):
+    email_service = FakeEmailService([])
     engine = RegistrationEngine(email_service)
-    fake_oauth = FakeOAuthManager()
-    engine.http_client = FakeOpenAIClient([session], ["sentinel-1"])
-    engine.oauth_manager = fake_oauth
+
+    def fake_run(self):
+        self.email_info = {"email": "tester@example.com", "service_id": "mailbox-1"}
+        self.email = "tester@example.com"
+        self.inbox_email = "tester@example.com"
+        self.password = "Passw0rd!"
+        self.device_id = "did-v2"
+        return {
+            "success": True,
+            "metadata": {
+                "phone_verification_required": True,
+                "token_pending": True,
+                "oauth_error": "add_phone required",
+            },
+        }
+
+    monkeypatch.setattr(AnyAutoRegistrationEngine, "run", fake_run)
 
     result = engine.run()
 
     assert result.success is True
-    assert result.source == "login"
-    assert fake_oauth.start_calls == 1
-    assert sum(1 for call in session.calls if call["url"] == OPENAI_API_ENDPOINTS["send_otp"]) == 0
-    assert len(email_service.otp_requests) == 1
-    assert email_service.otp_requests[0]["otp_sent_at"] is not None
-    assert result.metadata["token_acquired_via_relogin"] is False
+    assert result.source == "register"
+    assert result.email == "tester@example.com"
+    assert result.password == "Passw0rd!"
+    assert result.device_id == "did-v2"
+    assert result.access_token == ""
+    assert result.session_token == ""
+    assert result.metadata["phone_verification_required"] is True
+    assert result.metadata["token_pending"] is True
+    assert result.metadata["oauth_error"] == "add_phone required"
+    assert result.metadata["registration_flow"] == "any-auto-register"
+    assert result.metadata["has_session_token"] is False
+    assert result.metadata["has_access_token"] is False
