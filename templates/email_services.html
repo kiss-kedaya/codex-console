@@ -252,6 +252,7 @@
                     <div class="form-group">
                         <label for="custom-sub-type">服务类型</label>
                         <select id="custom-sub-type" name="sub_type">
+                            <option value="gptmail">GPTMail（mail.chatgpt.org.uk 免费临时邮箱）</option>
                             <option value="moemail">MoeMail（自定义域名 API）</option>
                             <option value="yydsmail">YYDS Mail (YYDS Mail API)</option>
                             <option value="tempmail">TempMail（自部署 Cloudflare Worker）</option>
@@ -260,6 +261,26 @@
                             <option value="freemail">Freemail（自部署 Cloudflare Worker）</option>
                             <option value="imap">标准 IMAP（Gmail/QQ/163等）</option>
                         </select>
+                    </div>
+                    <!-- GPTMail 字段 -->
+                    <div id="add-gptmail-fields" style="display:none;">
+                        <div class="form-group">
+                            <label for="custom-gm-base-url">API 地址</label>
+                            <input type="text" id="custom-gm-base-url" name="gm_base_url" placeholder="https://mail.chatgpt.org.uk" value="https://mail.chatgpt.org.uk">
+                        </div>
+                        <div class="form-group">
+                            <label for="custom-gm-proxy">代理地址（可选）</label>
+                            <input type="text" id="custom-gm-proxy" name="gm_proxy" placeholder="http://127.0.0.1:7890">
+                            <small style="color: var(--text-muted);">支持 HTTP/SOCKS5 代理</small>
+                        </div>
+                        <div class="import-info" style="background: var(--bg-secondary); padding: 12px; border-radius: 8px; margin-top: 8px;">
+                            <p><strong>GPTMail 说明：</strong></p>
+                            <ul style="margin: 8px 0 0 16px; padding: 0;">
+                                <li>免费临时邮箱服务，无需 API Key</li>
+                                <li>自动生成邮箱地址</li>
+                                <li>支持 OpenAI 注册验证码接收</li>
+                            </ul>
+                        </div>
                     </div>
                     <!-- MoeMail 字段 -->
                     <div id="add-moemail-fields">
@@ -436,6 +457,18 @@
                     <div class="form-group">
                         <label>服务类型</label>
                         <div id="edit-custom-type-badge" style="padding: 6px 0; color: var(--text-muted); font-size: 0.875rem;"></div>
+                    </div>
+                    <!-- GPTMail 字段 -->
+                    <div id="edit-gptmail-fields" style="display:none;">
+                        <div class="form-group">
+                            <label for="edit-gm-base-url">API 地址</label>
+                            <input type="text" id="edit-gm-base-url" name="gm_base_url" placeholder="https://mail.chatgpt.org.uk">
+                        </div>
+                        <div class="form-group">
+                            <label for="edit-gm-proxy">代理地址（可选）</label>
+                            <input type="text" id="edit-gm-proxy" name="gm_proxy" placeholder="http://127.0.0.1:7890">
+                            <small style="color: var(--text-muted);">支持 HTTP/SOCKS5 代理</small>
+                        </div>
                     </div>
                     <!-- MoeMail 字段 -->
                     <div id="edit-moemail-fields">

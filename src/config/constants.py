@@ -41,6 +41,7 @@ class EmailServiceType(str, Enum):
     IMAP_MAIL = "imap_mail"
     CLOUDMAIL = "cloudmail"
     LUCKMAIL = "luckmail"
+    GPTMAIL = "gptmail"
 
 
 # ============================================================================
@@ -164,6 +165,13 @@ EMAIL_SERVICE_DEFAULTS = {
         "timeout": 30,
         "max_retries": 3,
         "poll_interval": 3.0,
+    },
+    "gptmail": {
+        "base_url": "https://mail.chatgpt.org.uk",
+        "timeout": 30,
+        "max_retries": 5,
+        "poll_interval": 3.0,
+        "banned_domains_file": "data/gptmail_banned_domains.txt",
     }
 }
 

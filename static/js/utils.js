@@ -357,7 +357,8 @@ const statusMap = {
         duck_mail: 'DuckMail',
         luckmail: 'LuckMail',
         freemail: 'Freemail',
-        imap_mail: 'IMAP 邮箱'
+        imap_mail: 'IMAP 邮箱',
+        gptmail: 'GPTMail'
     }
 };
 

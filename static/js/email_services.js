@@ -61,6 +61,7 @@ const elements = {
     addLuckmailFields: document.getElementById('add-luckmail-fields'),
     addFreemailFields: document.getElementById('add-freemail-fields'),
     addImapFields: document.getElementById('add-imap-fields'),
+    addGptmailFields: document.getElementById('add-gptmail-fields'),
 
     // 编辑自定义域名模态框
     editCustomModal: document.getElementById('edit-custom-modal'),
@@ -74,6 +75,7 @@ const elements = {
     editLuckmailFields: document.getElementById('edit-luckmail-fields'),
     editFreemailFields: document.getElementById('edit-freemail-fields'),
     editImapFields: document.getElementById('edit-imap-fields'),
+    editGptmailFields: document.getElementById('edit-gptmail-fields'),
     editCustomTypeBadge: document.getElementById('edit-custom-type-badge'),
     editCustomSubTypeHidden: document.getElementById('edit-custom-sub-type-hidden'),
 
@@ -85,6 +87,7 @@ const elements = {
 };
 
 const CUSTOM_SUBTYPE_LABELS = {
+    gptmail: '🤖 GPTMail（mail.chatgpt.org.uk 免费临时邮箱）',
     yydsmail: 'YYDS Mail (YYDS Mail API)',
     moemail: '🔗 MoeMail（自定义域名 API）',
     tempmail: '📮 TempMail（自部署 Cloudflare Worker）',
@@ -148,7 +151,7 @@ function initEventListeners() {
     // 添加自定义域名
     elements.addCustomBtn.addEventListener('click', () => {
         elements.addCustomForm.reset();
-        switchAddSubType('moemail');
+        switchAddSubType('gptmail');
         elements.addCustomModal.classList.add('active');
     });
     elements.closeCustomModal.addEventListener('click', () => elements.addCustomModal.classList.remove('active'));
@@ -195,6 +198,7 @@ function closeEmailMoreMenu(el) {
 // 切换添加表单子类型
 function switchAddSubType(subType) {
     elements.customSubType.value = subType;
+    elements.addGptmailFields.style.display = subType === 'gptmail' ? '' : 'none';
     elements.addMoemailFields.style.display = subType === 'moemail' ? '' : 'none';
     elements.addYydsMailFields.style.display = subType === 'yydsmail' ? '' : 'none';
     elements.addTempmailFields.style.display = subType === 'tempmail' ? '' : 'none';
@@ -207,6 +211,7 @@ function switchAddSubType(subType) {
 // 切换编辑表单子类型显示
 function switchEditSubType(subType) {
     elements.editCustomSubTypeHidden.value = subType;
+    elements.editGptmailFields.style.display = subType === 'gptmail' ? '' : 'none';
     elements.editMoemailFields.style.display = subType === 'moemail' ? '' : 'none';
     elements.editYydsMailFields.style.display = subType === 'yydsmail' ? '' : 'none';
     elements.editTempmailFields.style.display = subType === 'tempmail' ? '' : 'none';
@@ -214,7 +219,7 @@ function switchEditSubType(subType) {
     elements.editLuckmailFields.style.display = subType === 'luckmail' ? '' : 'none';
     elements.editFreemailFields.style.display = subType === 'freemail' ? '' : 'none';
     elements.editImapFields.style.display = subType === 'imap' ? '' : 'none';
-    elements.editCustomTypeBadge.textContent = CUSTOM_SUBTYPE_LABELS[subType] || CUSTOM_SUBTYPE_LABELS.moemail;
+    elements.editCustomTypeBadge.textContent = CUSTOM_SUBTYPE_LABELS[subType] || CUSTOM_SUBTYPE_LABELS.gptmail;
 }
 
 // 加载统计信息
@@ -313,6 +318,9 @@ function getOutlookRegistrationBadge(service) {
 }
 
 function getCustomServiceTypeBadge(subType) {
+    if (subType === 'gptmail') {
+        return '<span class="status-badge" style="background-color:#10a37f;color:white;">GPTMail</span>';
+    }
     if (subType === 'moemail') {
         return '<span class="status-badge info">MoeMail</span>';
     }
@@ -335,6 +343,12 @@ function getCustomServiceTypeBadge(subType) {
 }
 
 function getCustomServiceAddress(service) {
+    if (service._subType === 'gptmail') {
+        const baseUrl = service.config?.base_url || 'https://mail.chatgpt.org.uk';
+        const proxy = service.config?.proxy_url || '';
+        const proxyText = proxy ? `<div style="color: var(--text-muted); margin-top: 4px;">代理：${escapeHtml(proxy)}</div>` : '';
+        return `${escapeHtml(baseUrl)}${proxyText}`;
+    }
     if (service._subType === 'imap') {
         const host = service.config?.host || '-';
         const emailAddr = service.config?.email || '';
@@ -356,10 +370,11 @@ function getCustomServiceAddress(service) {
     return `${escapeHtml(baseUrl)}<div style="color: var(--text-muted); margin-top: 4px;">默认域名：@${escapeHtml(domain)}</div>`;
 }
 
-// 加载自定义邮箱服务（moe_mail + temp_mail + duck_mail + luckmail + freemail + imap_mail 合并）
+// 加载自定义邮箱服务（gptmail + moe_mail + temp_mail + duck_mail + luckmail + freemail + imap_mail 合并）
 async function loadCustomServices() {
     try {
-        const [r1, r2, r3, r4, r5, r6, r7] = await Promise.all([
+        const [r0, r1, r2, r3, r4, r5, r6, r7] = await Promise.all([
+            api.get('/email-services?service_type=gptmail'),
             api.get('/email-services?service_type=moe_mail'),
             api.get('/email-services?service_type=yyds_mail'),
             api.get('/email-services?service_type=temp_mail'),
@@ -369,6 +384,7 @@ async function loadCustomServices() {
             api.get('/email-services?service_type=imap_mail')
         ]);
         customServices = [
+            ...(r0.services || []).map(s => ({ ...s, _subType: 'gptmail' })),
             ...(r1.services || []).map(s => ({ ...s, _subType: 'moemail' })),
             ...(r2.services || []).map(s => ({ ...s, _subType: 'yydsmail' })),
             ...(r3.services || []).map(s => ({ ...s, _subType: 'tempmail' })),
@@ -498,7 +514,13 @@ async function handleAddCustom(e) {
     const subType = formData.get('sub_type');
 
     let serviceType, config;
-    if (subType === 'moemail') {
+    if (subType === 'gptmail') {
+        serviceType = 'gptmail';
+        config = {
+            base_url: formData.get('gm_base_url') || 'https://mail.chatgpt.org.uk',
+            proxy_url: formData.get('gm_proxy') || ''
+        };
+    } else if (subType === 'moemail') {
         serviceType = 'moe_mail';
         config = {
             base_url: formData.get('api_url'),
@@ -750,24 +772,26 @@ function escapeHtml(text) {
 
 // ============== 编辑功能 ==============
 
-// 编辑自定义邮箱服务（支持 moemail / tempmail / duckmail）
+// 编辑自定义邮箱服务（支持 gptmail / moemail / tempmail / duckmail）
 async function editCustomService(id, subType) {
     try {
         const service = await api.get(`/email-services/${id}/full`);
         const resolvedSubType = subType || (
-            service.service_type === 'temp_mail'
-                ? 'tempmail'
-                : service.service_type === 'yyds_mail'
-                    ? 'yydsmail'
-                : service.service_type === 'duck_mail'
-                    ? 'duckmail'
-                    : service.service_type === 'luckmail'
-                        ? 'luckmail'
-                    : service.service_type === 'freemail'
-                        ? 'freemail'
-                        : service.service_type === 'imap_mail'
-                            ? 'imap'
-                            : 'moemail'
+            service.service_type === 'gptmail'
+                ? 'gptmail'
+                : service.service_type === 'temp_mail'
+                    ? 'tempmail'
+                    : service.service_type === 'yyds_mail'
+                        ? 'yydsmail'
+                    : service.service_type === 'duck_mail'
+                        ? 'duckmail'
+                        : service.service_type === 'luckmail'
+                            ? 'luckmail'
+                        : service.service_type === 'freemail'
+                            ? 'freemail'
+                            : service.service_type === 'imap_mail'
+                                ? 'imap'
+                                : 'moemail'
         );
 
         document.getElementById('edit-custom-id').value = service.id;
@@ -777,7 +801,10 @@ async function editCustomService(id, subType) {
 
         switchEditSubType(resolvedSubType);
 
-        if (resolvedSubType === 'moemail') {
+        if (resolvedSubType === 'gptmail') {
+            document.getElementById('edit-gm-base-url').value = service.config?.base_url || 'https://mail.chatgpt.org.uk';
+            document.getElementById('edit-gm-proxy').value = service.config?.proxy_url || '';
+        } else if (resolvedSubType === 'moemail') {
             document.getElementById('edit-custom-api-url').value = service.config?.base_url || '';
             document.getElementById('edit-custom-api-key').value = '';
             document.getElementById('edit-custom-api-key').placeholder = service.config?.api_key ? '已设置，留空保持不变' : 'API Key';
@@ -833,7 +860,12 @@ async function handleEditCustom(e) {
     const subType = formData.get('sub_type');
 
     let config;
-    if (subType === 'moemail') {
+    if (subType === 'gptmail') {
+        config = {
+            base_url: formData.get('gm_base_url') || 'https://mail.chatgpt.org.uk',
+            proxy_url: formData.get('gm_proxy') || ''
+        };
+    } else if (subType === 'moemail') {
         config = {
             base_url: formData.get('api_url'),
             default_domain: formData.get('domain')

@@ -1230,6 +1230,11 @@ async def get_available_email_services():
             "available": False,
             "count": 0,
             "services": []
+        },
+        "gptmail": {
+            "available": False,
+            "count": 0,
+            "services": []
         }
     }
 
@@ -1407,6 +1412,37 @@ async def get_available_email_services():
 
         result["luckmail"]["count"] = len(luckmail_services)
         result["luckmail"]["available"] = len(luckmail_services) > 0
+
+        # 获取 GPTMail 服务（mail.chatgpt.org.uk 免费临时邮箱）
+        gptmail_services = db.query(EmailServiceModel).filter(
+            EmailServiceModel.service_type == "gptmail",
+            EmailServiceModel.enabled == True
+        ).order_by(EmailServiceModel.priority.asc()).all()
+
+        for service in gptmail_services:
+            config = service.config or {}
+            result["gptmail"]["services"].append({
+                "id": service.id,
+                "name": service.name,
+                "type": "gptmail",
+                "base_url": config.get("base_url", "https://mail.chatgpt.org.uk"),
+                "priority": service.priority
+            })
+
+        result["gptmail"]["count"] = len(gptmail_services)
+        result["gptmail"]["available"] = len(gptmail_services) > 0
+
+        # 如果数据库中没有 GPTMail 服务，检查 settings 是否启用
+        if not result["gptmail"]["available"] and settings.gptmail_enabled:
+            result["gptmail"]["available"] = True
+            result["gptmail"]["count"] = 1
+            result["gptmail"]["services"].append({
+                "id": None,
+                "name": "GPTMail",
+                "type": "gptmail",
+                "base_url": settings.gptmail_base_url or "https://mail.chatgpt.org.uk",
+                "from_settings": True
+            })
 
     return result
 

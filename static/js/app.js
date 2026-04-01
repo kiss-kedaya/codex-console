@@ -28,7 +28,8 @@ let availableServices = {
     temp_mail: { available: false, services: [] },
     duck_mail: { available: false, services: [] },
     luckmail: { available: false, services: [] },
-    freemail: { available: false, services: [] }
+    freemail: { available: false, services: [] },
+    gptmail: { available: false, services: [] }
 };
 
 // WebSocket 相关变量
@@ -424,6 +425,25 @@ function updateEmailServiceOptions() {
 
         select.appendChild(optgroup);
     }
+
+    // GPTMail
+    if (availableServices.gptmail && availableServices.gptmail.available) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = `🤖 GPTMail (${availableServices.gptmail.count} 个服务)`;
+
+        availableServices.gptmail.services.forEach(service => {
+            const option = document.createElement('option');
+            option.value = `gptmail:${service.id || 'default'}`;
+            option.textContent = service.name;
+            option.dataset.type = 'gptmail';
+            if (service.id) {
+                option.dataset.serviceId = service.id;
+            }
+            optgroup.appendChild(option);
+        });
+
+        select.appendChild(optgroup);
+    }
 }
 
 // 处理邮箱服务切换
@@ -483,6 +503,11 @@ function handleServiceChange(e) {
         const service = availableServices.freemail.services.find(s => s.id == id);
         if (service) {
             addLog('info', `[系统] 已选择 Freemail 服务: ${service.name}`);
+        }
+    } else if (type === 'gptmail') {
+        const service = availableServices.gptmail.services.find(s => (s.id || 'default') == id);
+        if (service) {
+            addLog('info', `[系统] 已选择 GPTMail 服务: ${service.name}`);
         }
     }
 }

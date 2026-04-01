@@ -326,6 +326,38 @@ SETTING_DEFINITIONS: Dict[str, SettingDefinition] = {
         description="YYDS Mail 最大重试次数"
     ),
 
+    # GPTMail 配置
+    "gptmail_enabled": SettingDefinition(
+        db_key="gptmail.enabled",
+        default_value=False,
+        category=SettingCategory.TEMPMAIL,
+        description="是否启用 GPTMail 渠道"
+    ),
+    "gptmail_base_url": SettingDefinition(
+        db_key="gptmail.base_url",
+        default_value="https://mail.chatgpt.org.uk",
+        category=SettingCategory.TEMPMAIL,
+        description="GPTMail API 地址"
+    ),
+    "gptmail_timeout": SettingDefinition(
+        db_key="gptmail.timeout",
+        default_value=30,
+        category=SettingCategory.TEMPMAIL,
+        description="GPTMail 超时时间（秒）"
+    ),
+    "gptmail_max_retries": SettingDefinition(
+        db_key="gptmail.max_retries",
+        default_value=5,
+        category=SettingCategory.TEMPMAIL,
+        description="GPTMail 最大重试次数"
+    ),
+    "gptmail_poll_interval": SettingDefinition(
+        db_key="gptmail.poll_interval",
+        default_value=3.0,
+        category=SettingCategory.TEMPMAIL,
+        description="GPTMail 邮件轮询间隔（秒）"
+    ),
+
     # 自定义域名邮箱配置
     "custom_domain_base_url": SettingDefinition(
         db_key="custom_domain.base_url",
@@ -457,6 +489,10 @@ SETTING_TYPES: Dict[str, Type] = {
     "yyds_mail_enabled": bool,
     "yyds_mail_timeout": int,
     "yyds_mail_max_retries": int,
+    "gptmail_enabled": bool,
+    "gptmail_timeout": int,
+    "gptmail_max_retries": int,
+    "gptmail_poll_interval": float,
     "tm_enabled": bool,
     "cpa_enabled": bool,
     "email_code_timeout": int,
@@ -733,6 +769,13 @@ class Settings(BaseModel):
     yyds_mail_default_domain: str = ""
     yyds_mail_timeout: int = 30
     yyds_mail_max_retries: int = 3
+
+    # GPTMail 配置
+    gptmail_enabled: bool = False
+    gptmail_base_url: str = "https://mail.chatgpt.org.uk"
+    gptmail_timeout: int = 30
+    gptmail_max_retries: int = 5
+    gptmail_poll_interval: float = 3.0
 
     # 自定义域名邮箱配置
     custom_domain_base_url: str = ""
