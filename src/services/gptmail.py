@@ -339,7 +339,7 @@ class GPTMailService(BaseEmailService):
 
         Args:
             email: 邮箱地址
-            token: 邮箱 token
+            token: 邮箱 token（创建邮箱时返回的 auth.token）
 
         Returns:
             邮件列表
@@ -347,22 +347,12 @@ class GPTMailService(BaseEmailService):
         try:
             api_base = self.config["base_url"].rstrip("/")
             
-            # 获取 browser token
-            email_info = self._email_cache.get(email, {})
-            browser_token = email_info.get("browser_token") or self._browser_token
-            
-            if not browser_token:
-                # 重新访问首页获取 token
-                self._visit_homepage()
-                browser_token = self._browser_token
-            
+            # 直接使用 token（mail_token）作为 X-Inbox-Token
+            # 这是原始代码的正确逻辑
             headers = {
-                "Accept": "*/*",
-                "sec-fetch-site": "same-origin",
-                "sec-fetch-mode": "cors",
-                "sec-fetch-dest": "empty",
-                "referer": f"{api_base}/",
-                "x-inbox-token": browser_token,
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Inbox-Token": token,  # 关键：直接使用 mail_token
             }
             
             res = self.session.get(
@@ -370,7 +360,7 @@ class GPTMailService(BaseEmailService):
                 params={"email": email},
                 headers=headers,
                 timeout=self.config["timeout"],
-                impersonate=self.impersonate
+                impersonate="chrome131"  # 固定使用 chrome131
             )
             
             if res.status_code == 200:
@@ -384,6 +374,44 @@ class GPTMailService(BaseEmailService):
         except Exception as e:
             logger.debug(f"获取邮件列表失败: {e}")
             return []
+
+    def _fetch_email_detail(self, email_id: str, token: str) -> Optional[Dict[str, Any]]:
+        """
+        获取单封邮件详情
+
+        Args:
+            email_id: 邮件 ID
+            token: 邮箱 token
+
+        Returns:
+            邮件详情字典
+        """
+        try:
+            api_base = self.config["base_url"].rstrip("/")
+            
+            headers = {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                "X-Inbox-Token": token,
+            }
+            
+            res = self.session.get(
+                f"{api_base}/api/email/{email_id}",
+                headers=headers,
+                timeout=self.config["timeout"],
+                impersonate="chrome131"
+            )
+            
+            if res.status_code == 200:
+                data = res.json()
+                if data.get("success"):
+                    return data.get("data", {})
+            
+            return None
+            
+        except Exception as e:
+            logger.debug(f"获取邮件详情失败: {e}")
+            return None
 
     def _extract_verification_code(self, content: str) -> Optional[str]:
         """
@@ -474,14 +502,17 @@ class GPTMailService(BaseEmailService):
                     if "openai.com" not in from_addr.lower():
                         continue
                     
-                    # 从 html_content 或 content 提取验证码
-                    content = msg.get("html_content") or msg.get("content") or ""
-                    if content:
-                        code = self._extract_verification_code(content)
-                        if code:
-                            logger.info(f"GPTMail 验证码: {code}")
-                            self.update_status(True)
-                            return code
+                    # 获取邮件详情（关键：原始代码会单独获取详情）
+                    detail = self._fetch_email_detail(msg_id, token)
+                    if detail:
+                        # 从详情中的 content 或 html_content 提取验证码
+                        content = detail.get("content") or detail.get("html_content") or ""
+                        if content:
+                            code = self._extract_verification_code(content)
+                            if code:
+                                logger.info(f"GPTMail 验证码: {code}")
+                                self.update_status(True)
+                                return code
                 
             except Exception as e:
                 logger.debug(f"检查邮件时出错: {e}")

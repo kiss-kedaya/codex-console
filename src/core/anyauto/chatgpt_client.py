@@ -763,6 +763,9 @@ class ChatGPTClient:
                     continue
                 return False, "访问首页失败"
 
+            # 随机延迟（模拟真人操作）
+            random_delay(0.3, 0.8)
+
             # 2. 获取 CSRF token
             csrf_token = self.get_csrf_token()
             if not csrf_token:
@@ -770,12 +773,18 @@ class ChatGPTClient:
                     continue
                 return False, "获取 CSRF token 失败"
 
+            # 随机延迟
+            random_delay(0.2, 0.5)
+
             # 3. 提交邮箱，获取 authorize URL
             auth_url = self.signin(email, csrf_token)
             if not auth_url:
                 if auth_attempt < max_auth_attempts - 1:
                     continue
                 return False, "提交邮箱失败"
+
+            # 随机延迟
+            random_delay(0.3, 0.8)
 
             # 4. 访问 authorize URL（关键步骤！）
             final_url = self.authorize(auth_url)
@@ -819,10 +828,18 @@ class ChatGPTClient:
                 self._log("全新注册流程")
                 if register_submitted:
                     return False, "注册密码阶段重复进入"
+                
+                # 随机延迟
+                random_delay(0.5, 1.0)
+                
                 success, msg = self.register_user(email, password)
                 if not success:
                     return False, f"注册失败: {msg}"
                 register_submitted = True
+                
+                # 随机延迟
+                random_delay(0.3, 0.8)
+                
                 if not self.send_email_otp():
                     self._log("发送验证码接口返回失败，继续等待邮箱中的验证码...")
                 state = self._state_from_url(f"{self.AUTH}/email-verification")
@@ -836,6 +853,9 @@ class ChatGPTClient:
 
                 tried_codes = {otp_code}
                 for _ in range(3):
+                    # 随机延迟
+                    random_delay(0.3, 0.8)
+                    
                     success, next_state = self.verify_email_otp(otp_code, return_state=True)
                     if success:
                         otp_verified = True
@@ -872,6 +892,10 @@ class ChatGPTClient:
             if self._state_is_about_you(state):
                 if account_created:
                     return False, "填写信息阶段重复进入"
+                
+                # 随机延迟
+                random_delay(0.5, 1.5)
+                
                 success, next_state = self.create_account(
                     first_name,
                     last_name,
@@ -883,6 +907,10 @@ class ChatGPTClient:
                 account_created = True
                 state = next_state
                 self.last_registration_state = state
+                
+                # 随机延迟后执行回调
+                random_delay(0.2, 0.5)
+                self.callback()
                 continue
 
             if self._state_is_add_phone(state):

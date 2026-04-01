@@ -243,6 +243,24 @@ class AnyAutoRegistrationEngine:
                 )
                 if not success:
                     last_error = f"注册流失败: {msg}"
+                    
+                    # 检测不支持的邮箱域名，自动加入黑名单
+                    error_lower = str(msg or "").lower()
+                    # 只有 unsupported_email 和 account_deactivated 才加入黑名单
+                    # registration_disallowed 是风控问题，不是域名问题
+                    if "unsupported_email" in error_lower or "account_deactivated" in error_lower or "deactivated" in error_lower:
+                        # 从当前邮箱提取域名
+                        if "@" in normalized_email:
+                            domain = normalized_email.split("@")[1]
+                            self._log(f"检测到不支持的域名: {domain}，加入黑名单...")
+                            # 尝试调用 email_service 的黑名单方法
+                            if hasattr(self.email_service, "add_banned_domain"):
+                                try:
+                                    self.email_service.add_banned_domain(domain)
+                                    self._log(f"已将域名 {domain} 加入黑名单")
+                                except Exception as e:
+                                    self._log(f"加入黑名单失败: {e}")
+                    
                     if attempt < self.max_retries - 1 and self._should_retry(msg):
                         self._log(f"注册流失败，准备整流程重试: {msg}")
                         continue
