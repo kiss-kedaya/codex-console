@@ -213,6 +213,81 @@ async def test_dynamic_proxy(request: DynamicProxySettings):
         return {"success": False, "proxy_url": proxy_url, "message": f"代理连接失败: {e}"}
 
 
+# ============== 静态代理设置 ==============
+
+@router.get("/proxy/static")
+async def get_static_proxy_settings():
+    """获取静态代理设置"""
+    settings = get_settings()
+    return {
+        "enabled": settings.proxy_enabled,
+        "type": settings.proxy_type,
+        "host": settings.proxy_host,
+        "port": settings.proxy_port,
+        "username": settings.proxy_username or "",
+        "has_password": bool(settings.proxy_password and settings.proxy_password.get_secret_value()),
+    }
+
+
+class StaticProxySettings(BaseModel):
+    """静态代理设置"""
+    enabled: bool = False
+    type: str = "http"
+    host: str = "127.0.0.1"
+    port: int = 7890
+    username: Optional[str] = None
+    password: Optional[str] = None
+
+
+@router.post("/proxy/static")
+async def update_static_proxy_settings(request: StaticProxySettings):
+    """更新静态代理设置"""
+    update_dict = {
+        "proxy_enabled": request.enabled,
+        "proxy_type": request.type,
+        "proxy_host": request.host,
+        "proxy_port": request.port,
+        "proxy_username": request.username,
+    }
+    if request.password is not None:
+        update_dict["proxy_password"] = request.password
+
+    update_settings(**update_dict)
+    return {"success": True, "message": "静态代理设置已更新"}
+
+
+@router.post("/proxy/static/test")
+async def test_static_proxy(request: StaticProxySettings):
+    """测试静态代理连接"""
+    import time
+    from curl_cffi import requests as cffi_requests
+
+    # 构建代理 URL
+    scheme = "http" if request.type == "http" else "socks5"
+    auth = ""
+    if request.username and request.password:
+        auth = f"{request.username}:{request.password}@"
+    proxy_url = f"{scheme}://{auth}{request.host}:{request.port}"
+
+    try:
+        proxies = {"http": proxy_url, "https": proxy_url}
+        start = time.time()
+        resp = cffi_requests.get(
+            "https://api.ipify.org?format=json",
+            proxies=proxies,
+            timeout=10,
+            impersonate="chrome110"
+        )
+        elapsed = round((time.time() - start) * 1000)
+        if resp.status_code == 200:
+            ip = resp.json().get("ip", "")
+            return {"success": True, "ip": ip, "response_time": elapsed,
+                    "message": f"代理连接成功，出口 IP: {ip}，响应时间: {elapsed}ms"}
+        return {"success": False, "message": f"代理连接失败: HTTP {resp.status_code}"}
+    except Exception as e:
+        return {"success": False, "message": f"代理连接失败: {e}"}
+
+
 @router.get("/registration")
 async def get_registration_settings():
     """获取注册设置"""

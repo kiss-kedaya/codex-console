@@ -41,6 +41,9 @@ const elements = {
     // 动态代理设置
     dynamicProxyForm: document.getElementById('dynamic-proxy-form'),
     testDynamicProxyBtn: document.getElementById('test-dynamic-proxy-btn'),
+    // 静态代理设置
+    staticProxyForm: document.getElementById('static-proxy-form'),
+    testStaticProxyBtn: document.getElementById('test-static-proxy-btn'),
     // CPA 服务管理
     addCpaServiceBtn: document.getElementById('add-cpa-service-btn'),
     cpaServicesTable: document.getElementById('cpa-services-table'),
@@ -244,6 +247,14 @@ function initEventListeners() {
         elements.testDynamicProxyBtn.addEventListener('click', handleTestDynamicProxy);
     }
 
+    // 静态代理设置
+    if (elements.staticProxyForm) {
+        elements.staticProxyForm.addEventListener('submit', handleSaveStaticProxy);
+    }
+    if (elements.testStaticProxyBtn) {
+        elements.testStaticProxyBtn.addEventListener('click', handleTestStaticProxy);
+    }
+
     // 验证码设置
     if (elements.emailCodeForm) {
         elements.emailCodeForm.addEventListener('submit', handleSaveEmailCode);
@@ -334,6 +345,16 @@ async function loadSettings() {
         document.getElementById('dynamic-proxy-api-url').value = data.proxy?.dynamic_api_url || '';
         document.getElementById('dynamic-proxy-api-key-header').value = data.proxy?.dynamic_api_key_header || 'X-API-Key';
         document.getElementById('dynamic-proxy-result-field').value = data.proxy?.dynamic_result_field || '';
+
+        // 静态代理配置
+        document.getElementById('static-proxy-enabled').checked = data.proxy?.enabled || false;
+        document.getElementById('static-proxy-type').value = data.proxy?.type || 'http';
+        document.getElementById('static-proxy-host').value = data.proxy?.host || '127.0.0.1';
+        document.getElementById('static-proxy-port').value = data.proxy?.port || 7890;
+        document.getElementById('static-proxy-username').value = data.proxy?.username || '';
+        if (data.proxy?.has_password) {
+            document.getElementById('static-proxy-password').placeholder = '已设置，留空保持不变';
+        }
 
         // 注册配置
         document.getElementById('max-retries').value = data.registration?.max_retries || 3;
@@ -1108,6 +1129,67 @@ async function handleTestDynamicProxy() {
     } finally {
         btn.disabled = false;
         btn.textContent = '🔌 测试动态代理';
+    }
+}
+
+// ============== 静态代理设置 ==============
+
+async function handleSaveStaticProxy(e) {
+    e.preventDefault();
+    const data = {
+        enabled: document.getElementById('static-proxy-enabled').checked,
+        type: document.getElementById('static-proxy-type').value,
+        host: document.getElementById('static-proxy-host').value.trim(),
+        port: parseInt(document.getElementById('static-proxy-port').value) || 7890,
+        username: document.getElementById('static-proxy-username').value.trim() || null,
+        password: document.getElementById('static-proxy-password').value || null
+    };
+    
+    if (data.enabled && !data.host) {
+        toast.warning('请填写代理主机地址');
+        return;
+    }
+    
+    try {
+        await api.post('/settings/proxy/static', data);
+        toast.success('静态代理设置已保存');
+        document.getElementById('static-proxy-password').value = '';
+    } catch (error) {
+        toast.error('保存失败: ' + error.message);
+    }
+}
+
+async function handleTestStaticProxy() {
+    const host = document.getElementById('static-proxy-host').value.trim();
+    const port = document.getElementById('static-proxy-port').value;
+    
+    if (!host || !port) {
+        toast.warning('请填写代理主机地址和端口');
+        return;
+    }
+    
+    const btn = elements.testStaticProxyBtn;
+    btn.disabled = true;
+    btn.textContent = '测试中...';
+    
+    try {
+        const result = await api.post('/settings/proxy/static/test', {
+            type: document.getElementById('static-proxy-type').value,
+            host: host,
+            port: parseInt(port),
+            username: document.getElementById('static-proxy-username').value.trim() || null,
+            password: document.getElementById('static-proxy-password').value || null
+        });
+        if (result.success) {
+            toast.success(result.message);
+        } else {
+            toast.error(result.message);
+        }
+    } catch (error) {
+        toast.error('测试失败: ' + error.message);
+    } finally {
+        btn.disabled = false;
+        btn.textContent = '🔌 测试连接';
     }
 }
 
