@@ -2154,7 +2154,8 @@ class RegistrationEngine:
                         email_service=self.email_service.service_type.value,
                         email_service_id=self.email_info.get("service_id") if self.email_info else None,
                         status="failed",
-                        extra_data={"register_failed_reason": "email_already_registered_on_openai"}
+                        extra_data={"register_failed_reason": "email_already_registered_on_openai"},
+                        if_exists="return",
                     )
                     self._log(f"已在数据库中标记邮箱 {self.email} 为已注册状态")
         except Exception as e:
@@ -3025,7 +3026,8 @@ class RegistrationEngine:
                     id_token=result.id_token,
                     proxy_used=self.proxy_url,
                     extra_data=result.metadata,
-                    source=result.source
+                    source=result.source,
+                    if_exists="merge",
                 )
 
                 self._log(f"账户已存进数据库，落袋为安，ID: {account.id}")

@@ -2,10 +2,11 @@
 数据库 CRUD 操作
 """
 
-from typing import List, Optional, Dict, Any, Union
+from typing import List, Optional, Dict, Any, Union, Literal
 from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 from sqlalchemy import and_, or_, desc, asc, func
+from sqlalchemy.exc import IntegrityError
 
 from .models import Account, EmailService, RegistrationTask, Setting, Proxy, CpaService, Sub2ApiService
 
@@ -13,6 +14,60 @@ from .models import Account, EmailService, RegistrationTask, Setting, Proxy, Cpa
 # ============================================================================
 # 账户 CRUD
 # ============================================================================
+
+AccountConflictMode = Literal["raise", "return", "merge"]
+
+
+def _has_meaningful_account_value(value: Any) -> bool:
+    """判断账号字段值是否值得回写到已有记录。"""
+    if value is None:
+        return False
+    if isinstance(value, str):
+        return bool(value.strip())
+    if isinstance(value, dict):
+        return bool(value)
+    return True
+
+
+def _merge_account_payload(existing: Account, payload: Dict[str, Any]) -> None:
+    """将新账号载荷中的有效字段合并到已有账号记录。"""
+    merge_fields = (
+        "password",
+        "access_token",
+        "refresh_token",
+        "id_token",
+        "session_token",
+        "client_id",
+        "account_id",
+        "workspace_id",
+        "email_service",
+        "email_service_id",
+        "proxy_used",
+        "expires_at",
+        "status",
+        "source",
+        "cookies",
+    )
+
+    for field in merge_fields:
+        value = payload.get(field)
+        if _has_meaningful_account_value(value):
+            setattr(existing, field, value)
+
+    incoming_extra_data = payload.get("extra_data")
+    if _has_meaningful_account_value(incoming_extra_data):
+        merged_extra_data = dict(existing.extra_data or {})
+        merged_extra_data.update(incoming_extra_data)
+        existing.extra_data = merged_extra_data
+
+    incoming_registered_at = payload.get("registered_at")
+    incoming_status = payload.get("status")
+    if (
+        incoming_registered_at is not None
+        and (existing.registered_at is None or (existing.status == "failed" and incoming_status == "active"))
+    ):
+        existing.registered_at = incoming_registered_at
+
 
 def create_account(
     db: Session,
@@ -32,10 +87,11 @@ def create_account(
     expires_at: Optional['datetime'] = None,
     extra_data: Optional[Dict[str, Any]] = None,
     status: Optional[str] = None,
-    source: Optional[str] = None
+    source: Optional[str] = None,
+    if_exists: AccountConflictMode = "raise",
 ) -> Account:
-    """创建新账户"""
-    db_account = Account(
+    """创建新账户，可按策略处理邮箱重复。"""
+    payload = dict(
         email=email,
         password=password,
         client_id=client_id,
@@ -53,12 +109,39 @@ def create_account(
         extra_data=extra_data or {},
         status=status or 'active',
         source=source or 'register',
-        registered_at=datetime.utcnow()
+        registered_at=datetime.utcnow(),
     )
+
+    if if_exists != "raise":
+        existing = get_account_by_email(db, email)
+        if existing is not None:
+            if if_exists == "merge":
+                _merge_account_payload(existing, payload)
+                db.commit()
+                db.refresh(existing)
+            return existing
+
+    db_account = Account(**payload)
     db.add(db_account)
-    db.commit()
-    db.refresh(db_account)
-    return db_account
+    try:
+        db.commit()
+        db.refresh(db_account)
+        return db_account
+    except IntegrityError:
+        db.rollback()
+        if if_exists == "raise":
+            raise
+
+        existing = get_account_by_email(db, email)
+        if existing is None:
+            raise
+
+        if if_exists == "merge":
+            _merge_account_payload(existing, payload)
+            db.commit()
+            db.refresh(existing)
+
+        return existing
 
 
 def get_account_by_id(db: Session, account_id: int) -> Optional[Account]:

@@ -254,6 +254,9 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
             # 更新 TaskManager 状态
             task_manager.update_status(task_uuid, "running")
 
+            # 优先使用任务已绑定的邮箱服务，避免批量 Outlook 任务在并发下抢同一邮箱。
+            bound_email_service_id = email_service_id or getattr(task, "email_service_id", None)
+
             # 确定使用的代理
             # 如果前端传入了代理参数，使用传入的
             # 否则从代理列表或系统设置中获取
@@ -273,10 +276,10 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
             settings = get_settings()
 
             # 优先使用数据库中配置的邮箱服务
-            if email_service_id:
+            if bound_email_service_id:
                 from ...database.models import EmailService as EmailServiceModel
                 db_service = db.query(EmailServiceModel).filter(
-                    EmailServiceModel.id == email_service_id,
+                    EmailServiceModel.id == bound_email_service_id,
                     EmailServiceModel.enabled == True
                 ).first()
 
@@ -287,7 +290,7 @@ def _run_sync_registration_task(task_uuid: str, email_service_type: str, proxy: 
                     crud.update_registration_task(db, task_uuid, email_service_id=db_service.id)
                     logger.info(f"使用数据库邮箱服务: {db_service.name} (ID: {db_service.id}, 类型: {service_type.value})")
                 else:
-                    raise ValueError(f"邮箱服务不存在或已禁用: {email_service_id}")
+                    raise ValueError(f"邮箱服务不存在或已禁用: {bound_email_service_id}")
             else:
                 # 使用默认配置或传入的配置
                 if service_type == EmailServiceType.TEMPMAIL:
